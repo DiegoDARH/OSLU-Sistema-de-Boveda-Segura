@@ -148,5 +148,5 @@ npx prisma migrate dev --name <nombre>   # nueva migración
 - **Node.js crypto** (AES‑256‑GCM, SHA‑256, HMAC)
 - **Tailwind CSS** · **Vitest**
 
-Detalles de arquitectura interna y convenciones en
-[`CLAUDE.md`](CLAUDE.md) y [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Detalles de arquitectura interna y convenciones de contribución en
+[`CONTRIBUTING.md`](CONTRIBUTING.md).

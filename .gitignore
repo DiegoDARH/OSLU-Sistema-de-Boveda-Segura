@@ -56,3 +56,6 @@ npm-debug.log*
 /LOGO.png
 /image.png
 /repositorio.png
+
+# ─── Notas internas para el asistente de IA (no es documentación pública) ────
+/CLAUDE.md
