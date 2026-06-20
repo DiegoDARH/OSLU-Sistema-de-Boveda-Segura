@@ -1,9 +1,18 @@
-# 🔐 Sistema de Bóveda Segura
+# 🔐 OSLU — Sistema de Bóveda Segura
 
-Repositorio documental de alta seguridad construido con **Next.js 15** (App Router),
-**Prisma** y **PostgreSQL**. Implementa cifrado de archivos en reposo
-(AES‑256‑GCM), control de acceso por **rol + clasificación + necesidad de saber**
-y una **bitácora de auditoría inmutable** encadenada por firma HMAC.
+**OSLU** es una bóveda documental para información sensible: cada archivo se
+cifra individualmente, cada acceso pasa por tres barreras de seguridad
+(usuario activo, clasificación y necesidad de saber) y cada acción —subida,
+descarga, login, borrado— queda registrada en una bitácora que no se puede
+alterar ni borrar, ni siquiera por un administrador con acceso directo a la
+base de datos.
+
+Construido con **Next.js 15** (App Router) y **PostgreSQL** vía **Prisma**.
+El login es de dos pasos: contraseña y, obligatoriamente, **reconocimiento
+facial** como segundo factor. El cifrado es **AES‑256‑GCM** con clave por
+archivo envuelta en una clave maestra del servidor (envelope encryption), y el
+control de acceso sigue el modelo **Bell‑LaPadula** ("no leer hacia arriba")
+combinado con autorizaciones explícitas por proyecto.
 
 ---
 
@@ -63,86 +72,22 @@ flowchart TB
 
 ---
 
-## 🗃️ Modelo de datos
+## 📸 Capturas del sistema
 
-```mermaid
-erDiagram
-    Rol ||--o{ Usuario : tiene
-    ClasificacionSeguridad ||--o{ Usuario : acredita
-    ClasificacionSeguridad ||--o{ Archivo : clasifica
-    ClasificacionSeguridad ||--o{ Proyecto : "nivel mínimo"
-    Usuario ||--o{ Archivo : sube
-    Usuario ||--o{ NecesidadSaber : autorizado
-    Proyecto ||--o{ NecesidadSaber : alcance
-    Proyecto ||--o{ Archivo : contiene
-    Archivo ||--|| GestionClave : "clave AES"
-    Usuario ||--o{ LogAcceso : genera
-    Usuario ||--o{ Biometria : registra
-    Usuario ||--o{ EventoMFA : registra
+**Dashboard** — vista general, estado de la bóveda y accesos rápidos
+![Dashboard](public/screenshots/dashboard.png)
 
-    Usuario {
-        string id PK
-        string nombre_usuario UK
-        string password_hash
-        boolean activo
-        string rol_id FK
-        string nivel_clasificacion_id FK
-    }
-    Archivo {
-        string id PK
-        string nombre_archivo
-        string ruta_cifrada
-        string hash_original "SHA-256"
-        string proyecto_id FK
-        string nivel_clasificacion_id FK
-    }
-    GestionClave {
-        string id PK
-        string archivo_id FK
-        string clave_cifrada "envelope AES"
-    }
-    LogAcceso {
-        string id PK
-        string evento
-        string hash_anterior
-        string firma_digital "HMAC-SHA256"
-    }
-    NecesidadSaber {
-        string id PK
-        string usuario_id FK
-        string proyecto_id FK
-        string autorizado_por
-    }
-```
+**Bóveda** — proyectos (compartimentos) y archivos cifrados
+![Bóveda](public/screenshots/boveda.png)
 
----
+**Gestión de usuarios** — roles y niveles de acreditación
+![Usuarios](public/screenshots/usuarios.png)
 
-## 🔓 Flujo de acceso a un archivo
+**Auditoría** — bitácora inmutable con verificación de integridad de la cadena
+![Auditoría](public/screenshots/auditoria.png)
 
-```mermaid
-sequenceDiagram
-    actor U as Usuario
-    participant MW as middleware (Edge)
-    participant API as /api/archivos/[id]/download
-    participant AC as lib/access
-    participant CR as lib/crypto
-    participant AU as lib/audit
-
-    U->>MW: GET /api/archivos/123/download (cookie JWT)
-    MW->>MW: verifica JWT, inyecta x-user-*
-    MW->>API: request autenticada
-    API->>AC: puedeAccederArchivo(user, archivo)
-    AC-->>API: clasificación OK + need-to-know OK
-    API->>CR: unwrapKey() + decryptBuffer()
-    CR->>CR: verifica authTag GCM
-    API->>CR: hashContent == hash_original ?
-    CR-->>API: integridad OK
-    API->>AU: registrarEvento(DOWNLOAD)
-    API-->>U: archivo descifrado (stream)
-```
-
-> Si cualquier barrera falla, se responde `403/409` y se registra un evento
-> `ACCESS_DENIED` en la bitácora inmutable.
+**Información** — propósito del sistema y características de seguridad
+![Información](public/screenshots/informacion.png)
 
 ---
 
