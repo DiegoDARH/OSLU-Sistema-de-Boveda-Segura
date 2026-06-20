@@ -74,6 +74,9 @@ flowchart TB
 
 ## 📸 Capturas del sistema
 
+**Login** — autenticación en dos pasos (contraseña + MFA facial)
+![Login](public/screenshots/login.png)
+
 **Dashboard** — vista general, estado de la bóveda y accesos rápidos
 ![Dashboard](public/screenshots/dashboard.png)
 
