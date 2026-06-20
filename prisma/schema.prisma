@@ -1,0 +1,239 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Prisma schema — Sistema de Bóveda Segura (v2 — normativa de alta seguridad)
+// PostgreSQL + Prisma ORM
+//
+// Cambios clave frente a v1:
+//   · Roles y Clasificación de Seguridad pasan a ser TABLAS (antes enums).
+//   · Login por `nombre_usuario` (antes email).
+//   · Archivos cifrados en disco (AES-256-GCM) + hash SHA-256 de integridad.
+//   · Claves AES por archivo en `gestion_claves` (cifradas con master key).
+//   · Bitácora inmutable encadenada por hash + firma HMAC.
+//   · Control Need-to-Know por proyecto/compartimento.
+//   · Biometría y MFA: estructura presente, lógica diferida.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// IDENTIDAD Y CONTROL DE ACCESO
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Roles del sistema. El control jerárquico se hace por `nivel_numerico`.
+/// Ej.: ADMIN=3, GESTOR=2, ANALISTA/LECTOR=1.
+model Rol {
+  id            String    @id @default(cuid())
+  nombre_rol    String    @unique @db.VarChar(50) // ej. "Analista", "Gestor", "Administrador"
+  nivel_numerico Int       @default(1)            // jerarquía: mayor = más privilegios
+  descripcion   String?   @db.Text
+
+  usuarios      Usuario[]
+
+  @@map("roles")
+}
+
+/// Niveles de clasificación de seguridad (modelo Bell-LaPadula simplificado).
+/// Ej.: PUBLICO=1, NORMAL=2, CONFIDENCIAL=3, TOP_SECRET=4.
+model ClasificacionSeguridad {
+  id             String   @id @default(cuid())
+  nombre         String   @unique @db.VarChar(50)
+  nivel_numerico Int      @unique                 // orden de sensibilidad
+  descripcion    String?  @db.Text
+
+  usuarios       Usuario[]                        // acreditación (clearance) del usuario
+  archivos       Archivo[]                        // clasificación del archivo
+  proyectos      Proyecto[]                       // nivel mínimo del compartimento
+
+  @@map("clasificacion_seguridad")
+}
+
+/// Usuarios del sistema. Autenticación por `nombre_usuario` + `password_hash` (bcrypt).
+model Usuario {
+  id                      String   @id @default(cuid())
+  nombre_usuario          String   @unique @db.VarChar(120)
+  password_hash           String   @db.Text       // bcrypt
+  activo                  Boolean  @default(true)
+  fecha_creacion          DateTime @default(now())
+  fecha_actualizacion     DateTime @updatedAt
+
+  rol_id                  String
+  nivel_clasificacion_id  String                   // acreditación máxima del usuario
+
+  rol                     Rol                    @relation(fields: [rol_id], references: [id], onDelete: Restrict)
+  nivel_clasificacion     ClasificacionSeguridad @relation(fields: [nivel_clasificacion_id], references: [id], onDelete: Restrict)
+
+  archivos                Archivo[]
+  necesidades_saber       NecesidadSaber[]         @relation("UsuarioAutorizado")
+  autorizaciones_dadas    NecesidadSaber[]         @relation("UsuarioAutorizador")
+  biometrias              Biometria[]
+  eventos_mfa             EventoMFA[]
+
+  @@index([nombre_usuario])
+  @@index([rol_id])
+  @@map("usuarios")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPARTIMENTOS Y NEED-TO-KNOW
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Proyecto o compartimento de información. Agrupa archivos y exige un nivel
+/// mínimo de clasificación para que un usuario pueda participar.
+model Proyecto {
+  id                          String   @id @default(cuid())
+  nombre_proyecto             String   @db.VarChar(150)
+  descripcion                 String?  @db.Text
+  fecha_creacion              DateTime @default(now())
+
+  nivel_clasificacion_minimo_id String
+
+  nivel_clasificacion_minimo  ClasificacionSeguridad @relation(fields: [nivel_clasificacion_minimo_id], references: [id], onDelete: Restrict)
+
+  archivos                    Archivo[]
+  necesidades_saber           NecesidadSaber[]
+
+  @@index([nivel_clasificacion_minimo_id])
+  @@map("proyectos")
+}
+
+/// Autorización explícita "necesidad de saber": un usuario sólo accede a los
+/// archivos de un proyecto si existe esta fila. Es la segunda barrera tras el
+/// nivel de clasificación.
+model NecesidadSaber {
+  id              String   @id @default(cuid())
+  usuario_id      String
+  proyecto_id     String
+  autorizado_por  String                            // id del usuario que concedió el acceso
+  fecha_concesion DateTime @default(now())
+
+  usuario         Usuario  @relation("UsuarioAutorizado",  fields: [usuario_id],     references: [id], onDelete: Cascade)
+  autorizador     Usuario  @relation("UsuarioAutorizador", fields: [autorizado_por], references: [id], onDelete: Restrict)
+  proyecto        Proyecto @relation(fields: [proyecto_id], references: [id], onDelete: Cascade)
+
+  @@unique([usuario_id, proyecto_id])               // un acceso por par usuario/proyecto
+  @@index([usuario_id])
+  @@index([proyecto_id])
+  @@map("necesidad_saber")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ARCHIVOS CIFRADOS Y GESTIÓN DE CLAVES
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum EstadoArchivo {
+  ACTIVO
+  ARCHIVADO
+  ELIMINADO   // baja lógica — el archivo físico cifrado puede purgarse aparte
+}
+
+/// Metadatos de un archivo. El contenido vive cifrado en disco (`ruta_cifrada`).
+/// `hash_original` (SHA-256) permite verificar integridad tras descifrar.
+model Archivo {
+  id                      String        @id @default(cuid())
+  nombre_archivo          String        @db.VarChar(255) // nombre original visible
+  ruta_cifrada            String        @db.Text          // ruta del .enc en disco
+  hash_original           String        @db.VarChar(64)   // SHA-256 hex del contenido original
+  tamanio                 Int                             // bytes del original
+  mime_type               String?       @db.VarChar(100)
+  descripcion             String?       @db.Text
+  estado                  EstadoArchivo @default(ACTIVO)
+  fecha_subida            DateTime      @default(now())
+  fecha_actualizacion     DateTime      @updatedAt
+
+  usuario_id              String
+  nivel_clasificacion_id  String
+  proyecto_id             String
+
+  usuario                 Usuario                @relation(fields: [usuario_id],            references: [id], onDelete: Restrict)
+  nivel_clasificacion     ClasificacionSeguridad @relation(fields: [nivel_clasificacion_id], references: [id], onDelete: Restrict)
+  proyecto                Proyecto               @relation(fields: [proyecto_id],           references: [id], onDelete: Restrict)
+  clave                   GestionClave?
+
+  @@index([usuario_id])
+  @@index([proyecto_id])
+  @@index([nivel_clasificacion_id])
+  @@map("archivos")
+}
+
+/// Clave AES-256 por archivo, almacenada CIFRADA con la master key del servidor
+/// (envelope encryption). Soporta rotación programada.
+model GestionClave {
+  id                       String   @id @default(cuid())
+  archivo_id               String   @unique
+  clave_cifrada            String   @db.Text   // formato: ivMaster:authTagMaster:claveAESCifrada (hex)
+  fecha_generacion         DateTime @default(now())
+  fecha_rotacion_programada DateTime?
+  activo                   Boolean  @default(true)
+
+  archivo                  Archivo  @relation(fields: [archivo_id], references: [id], onDelete: Cascade)
+
+  @@map("gestion_claves")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BITÁCORA INMUTABLE (NO UPDATE / NO DELETE)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Bitácora de auditoría inmutable. Cada fila encadena su firma con el
+/// `hash_anterior` (estilo blockchain). NO se permiten UPDATE ni DELETE:
+/// las reglas que lo imponen a nivel SQL están en la migración (ver schema.sql).
+model LogAcceso {
+  id            String   @id @default(cuid())
+  usuario_id    String?                          // referencia histórica — sin FK (la tabla es inmutable)
+  evento        String   @db.VarChar(80)          // LOGIN | LOGIN_FAILED | UPLOAD | DOWNLOAD | VIEW | DELETE | ...
+  detalle       String?  @db.Text
+  ip_address    String?  @db.VarChar(45)
+  user_agent    String?  @db.Text
+  timestamp     DateTime @default(now())
+  hash_anterior String   @db.VarChar(64)          // SHA-256 hex del log previo (o "GENESIS")
+  firma_digital String   @db.VarChar(64)          // HMAC-SHA256 hex de esta entrada
+
+  @@index([usuario_id])
+  @@index([timestamp])
+  @@map("logs_acceso_inmutable")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FACTORES ADICIONALES (estructura presente — lógica diferida)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Plantillas biométricas. Para rostro (tipo_biometria = "FACIAL") se guarda el
+/// descriptor de 128 dimensiones CIFRADO (AES-256-GCM con la master key) en
+/// `descriptor_cifrado`, más un hash SHA-512 del descriptor para detección de
+/// manipulación. La comparación (distancia euclidiana) ocurre en el servidor.
+model Biometria {
+  id                 String   @id @default(cuid())
+  usuario_id         String
+  tipo_biometria     String   @db.VarChar(40)   // "FACIAL" | "huella" | ...
+  hash_template      String   @db.VarChar(128)  // SHA-512 hex del descriptor
+  sal_template       String   @db.VarChar(64)
+  descriptor_cifrado String?  @db.Text          // descriptor 128-d (JSON) cifrado
+  fecha_registro     DateTime @default(now())
+
+  usuario            Usuario  @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id])
+  @@map("biometria")
+}
+
+/// Registro de eventos MFA. Sólo estructura: el desafío/respuesta del segundo
+/// factor se implementará en una fase posterior.
+model EventoMFA {
+  id          String   @id @default(cuid())
+  usuario_id  String
+  tipo_factor String   @db.VarChar(40)   // ej. "TOTP", "SMS", "WEBAUTHN"
+  resultado   String   @db.VarChar(20)   // "EXITO" | "FALLO"
+  timestamp   DateTime @default(now())
+  detalles    String?  @db.Text
+
+  usuario     Usuario  @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id])
+  @@map("eventos_mfa")
+}

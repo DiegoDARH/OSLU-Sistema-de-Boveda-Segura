@@ -1,0 +1,50 @@
+name: CI
+
+# El robot valida cada Pull Request hacia main/develop y cada push a esas ramas.
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  build-and-test:
+    name: Lint + Test + Build
+    runs-on: ubuntu-latest
+
+    # Variables ficticias: el pipeline no necesita una BD real para lint/test/build.
+    # Las claves cumplen el formato exigido (64 hex) para que crypto/audit no fallen.
+    env:
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/boveda?schema=public"
+      JWT_SECRET: "ci-jwt-secret-suficientemente-largo-para-pruebas"
+      MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      HMAC_SECRET: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+    steps:
+      # 1) Descargar el código
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # 2) Instalar dependencias (reproducible con package-lock.json)
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Necesario: generar el cliente Prisma antes de compilar/typecheck.
+      - name: Generar cliente Prisma
+        run: npx prisma generate
+
+      # 3) Comandos de verificación
+      - name: Lint
+        run: npm run lint
+
+      - name: Pruebas unitarias
+        run: npm test
+
+      - name: Build de producción
+        run: npm run build

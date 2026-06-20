@@ -1,0 +1,100 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-surface text-slate-900;
+  }
+
+  ::-webkit-scrollbar       { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-transparent; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
+  ::-webkit-scrollbar-thumb:hover { @apply bg-slate-400; }
+}
+
+@layer components {
+  /* ── Sidebar ─────────────────────────────────────────────────────────────── */
+  .sidebar-item {
+    @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sidebar-text text-sm font-medium
+           transition-colors duration-150 cursor-pointer select-none;
+  }
+  .sidebar-item:hover   { @apply bg-sidebar-hover text-sidebar-text-active; }
+  .sidebar-item.active  { @apply bg-sidebar-active text-sidebar-text-active; }
+  .sidebar-section-label {
+    @apply text-[11px] font-semibold uppercase tracking-wider text-sidebar-text-muted
+           px-3 pt-5 pb-1;
+  }
+
+  /* ── Cards ───────────────────────────────────────────────────────────────── */
+  .card {
+    @apply bg-surface-card rounded-xl shadow-card border border-surface-border p-5;
+  }
+  .card-hover {
+    @apply transition-shadow duration-200 hover:shadow-card-hover;
+  }
+
+  /* ── Buttons ─────────────────────────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2
+           text-sm font-medium transition-all duration-150 cursor-pointer
+           disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none
+           focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-1;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-white hover:bg-brand-600 active:bg-brand-700;
+  }
+  .btn-secondary {
+    @apply btn bg-surface-card text-slate-700 border border-surface-border
+           hover:bg-surface-hover active:bg-slate-200;
+  }
+  .btn-danger {
+    @apply btn bg-status-danger text-white hover:bg-red-700;
+  }
+  .btn-ghost {
+    @apply btn text-slate-600 hover:bg-surface-hover hover:text-slate-900;
+  }
+  .btn-dark {
+    @apply btn bg-sidebar-bg text-white hover:bg-slate-800;
+  }
+
+  /* ── Inputs ──────────────────────────────────────────────────────────────── */
+  .input {
+    @apply w-full rounded-lg border border-surface-border bg-surface-card
+           px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400
+           transition-colors focus:outline-none focus:ring-2
+           focus:ring-brand-500 focus:border-transparent;
+  }
+  .input-error { @apply border-status-danger focus:ring-status-danger; }
+
+  /* ── Badges ──────────────────────────────────────────────────────────────── */
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .badge-active   { @apply badge bg-status-active-bg  text-status-active;   }
+  .badge-inactive { @apply badge bg-status-inactive-bg text-status-inactive; }
+  .badge-pending  { @apply badge bg-status-pending-bg text-status-pending;  }
+  .badge-danger   { @apply badge bg-status-danger-bg  text-status-danger;   }
+  .badge-info     { @apply badge bg-status-info-bg    text-status-info;     }
+
+  /* ── Table ───────────────────────────────────────────────────────────────── */
+  .table-header-cell {
+    @apply px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide
+           select-none;
+  }
+  .table-cell {
+    @apply px-4 py-3 text-sm text-slate-700 whitespace-nowrap;
+  }
+  .table-row {
+    @apply border-t border-surface-border transition-colors hover:bg-surface-hover;
+  }
+}
